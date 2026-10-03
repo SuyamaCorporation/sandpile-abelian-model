@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abelian Sandpile Model</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  #sandCanvas {
+    cursor: crosshair;
+    image-rendering: pixelated;
+    display: block;
+    border-radius: 8px;
+  }
+  .canvas-wrapper {
+    overflow: hidden;
+    border-radius: 8px;
+    border: 2px solid #374151;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen p-4">
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-3xl font-bold text-center mb-1 text-yellow-400">Abelian Sandpile Model</h1>
+  <p class="text-center text-gray-400 text-sm mb-3">Click canvas to drop grains — watch fractal avalanches emerge</p>
+
+  <!-- Controls -->
+  <div class="flex flex-wrap gap-2 justify-center mb-3">
+    <button onclick="addGrainsCenter(1)" aria-label="Drop 1 grain at center"
+      class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      +1 Grain (Center)
+    </button>
+    <button onclick="addGrainsCenter(100)" aria-label="Drop 100 grains at center"
+      class="bg-orange-600 hover:bg-orange-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      +100 Grains
+    </button>
+    <button onclick="addGrainsCenter(1000)" aria-label="Drop 1000 grains at center"
+      class="bg-red-600 hover:bg-red-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      +1000 Grains
+    </button>
+    <button onclick="toggleAuto()" id="autoBtn" aria-label="Toggle auto-run mode"
+      class="bg-green-700 hover:bg-green-600 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      Auto-Run
+    </button>
+    <button onclick="stepOnce()" aria-label="Single step"
+      class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      Step
+    </button>
+    <button onclick="resetGrid()" aria-label="Reset grid"
+      class="bg-gray-600 hover:bg-gray-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition">
+      Reset
+    </button>
+  </div>
+
+  <!-- Speed & Zoom -->
+  <div class="flex flex-wrap gap-4 justify-center items-center mb-3">
+    <div class="flex items-center gap-2">
+      <label for="speedSlider" class="text-sm text-gray-300">Speed:</label>
+      <input type="range" id="speedSlider" min="1" max="20" value="5" aria-label="Animation speed"
+        class="w-28 accent-yellow-400" oninput="updateSpeed()">
+      <span class="text-sm text-yellow-400 w-6" id="speedVal">5</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-sm text-gray-300">Zoom:</label>
+      <button onclick="changeZoom(-1)" aria-label="Zoom out" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-sm">−</button>
+      <span class="text-sm text-yellow-400 w-8 text-center" id="zoomVal">1×</span>
+      <button onclick="changeZoom(1)" aria-label="Zoom in" class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-sm">+</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="flex gap-4 justify-center mb-3 text-sm">
+    <div class="bg-gray-800 rounded-lg px-3 py-1">
+      <span class="text-gray-400">Grains dropped: </span>
+      <span class="font-bold text-yellow-400" id="grainCount">0</span>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-3 py-1">
+      <span class="text-gray-400">Topples: </span>
+      <span class="font-bold text-green-400" id="toppleCount">0</span>
+    </div>
+    <div class="bg-gray-800 rounded-lg px-3 py-1">
+      <span class="text-gray-400">Active: </span>
+      <span class="font-bold text-blue-400" id="activeCount">0</span>
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-wrapper mx-auto" id="canvasWrapper" style="width:420px;max-width:100%;height:420px;">
+    <canvas id="sandCanvas" aria-label="Sandpile simulation canvas"></canvas>
+  </div>
+
+  <!-- Color legend -->
+  <div class="flex gap-3 justify-center mt-3 flex-wrap">
+    <div class="flex items-center gap-1 text-xs">
+      <span class="w-4 h-4 rounded inline-block" style="background:#000"></span> 0 grains
+    </div>
+    <div class="flex items-center gap-1 text-xs">
+      <span class="w-4 h-4 rounded inline-block" style="background:#1d4ed8"></span> 1 grain
+    </div>
+    <div class="flex items-center gap-1 text-xs">
+      <span class="w-4 h-4 rounded inline-block" style="background:#16a34a"></span> 2 grains
+    </div>
+    <div class="flex items-center gap-1 text-xs">
+      <span class="w-4 h-4 rounded inline-block" style="background:#ca8a04"></span> 3 grains
+    </div>
+    <div class="flex items-center gap-1 text-xs">
+      <span class="w-4 h-4 rounded inline-block" style="background:#dc2626"></span> 4+ topple
+    </div>
+  </div>
+</div>
+
+<script>
+// --- Grid parameters ---
+const GRID = 100; // 100x100 cells
+const COLORS = ['#000000','#1d4ed8','#16a34a','#ca8a04','#dc2626'];
+const TOPPLE_THRESHOLD = 4;
+
+let grid = new Uint8Array(GRID * GRID);
+let totalGrains = 0;
+let totalTopples = 0;
+let autoRunning = false;
+let autoInterval = null;
+let speed = 5;
+let zoom = 1;
+let pendingGrains = 0;
+
+// Canvas setup
+const canvas = document.getElementById('sandCanvas');
+const ctx = canvas.getContext('2d');
+
+function setCanvasSize() {
+  const wrapper = document.getElementById('canvasWrapper');
+  const size = Math.min(420, wrapper.offsetWidth);
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  canvas.width = GRID;
+  canvas.height = GRID;
+}
+
+function idx(x, y) { return y * GRID + x; }
+
+function resetGrid() {
+  grid.fill(0);
+  totalGrains = 0;
+  totalTopples = 0;
+  pendingGrains = 0;
+  updateStats();
+  render();
+}
+
+function addGrainsCenter(n) {
+  const cx = Math.floor(GRID / 2);
+  const cy = Math.floor(GRID / 2);
+  grid[idx(cx, cy)] = Math.min(255, grid[idx(cx, cy)] + n);
+  totalGrains += n;
+  updateStats();
+  if (!autoRunning) {
+    stabilize(200); // run up to 200 topple rounds
+    render();
+  }
+}
+
+function addGrainsAt(x, y, n) {
+  if (x < 0 || x >= GRID || y < 0 || y >= GRID) return;
+  grid[idx(x, y)] = Math.min(255, grid[idx(x, y)] + n);
+  totalGrains += n;
+  updateStats();
+  if (!autoRunning) {
+    stabilize(200);
+    render();
+  }
+}
+
+// --- Toppling ---
+function toppleStep() {
+  const newGrid = new Uint8Array(grid);
+  let toppled = 0;
+  for (let y = 0; y < GRID; y++) {
+    for (let x = 0; x < GRID; x++) {
+      if (grid[idx(x,y)] >= TOPPLE_THRESHOLD) {
+        const k = Math.floor(grid[idx(x,y)] / TOPPLE_THRESHOLD);
+        newGrid[idx(x,y)] -= k * TOPPLE_THRESHOLD;
+        if (x > 0)      newGrid[idx(x-1,y)] = Math.min(255, newGrid[idx(x-1,y)] + k);
+        if (x < GRID-1) newGrid[idx(x+1,y)] = Math.min(255, newGrid[idx(x+1,y)] + k);
+        if (y > 0)      newGrid[idx(x,y-1)] = Math.min(255, newGrid[idx(x,y-1)] + k);
+        if (y < GRID-1) newGrid[idx(x,y+1)] = Math.min(255, newGrid[idx(x,y+1)] + k);
+        toppled += k;
+        // boundary grains fall off (sink)
+      }
+    }
+  }
+  grid = newGrid;
+  totalTopples += toppled;
+  return toppled;
+}
+
+function stabilize(maxRounds) {
+  for (let r = 0; r < maxRounds; r++) {
+    const t = toppleStep();
+    if (t === 0) break;
+  }
+  updateStats();
+}
+
+function stepOnce() {
+  const t = toppleStep();
+  totalTopples += 0; // already counted in toppleStep
+  updateStats();
+  render();
+}
+
+// --- Auto-run ---
+function toggleAuto() {
+  autoRunning = !autoRunning;
+  const btn = document.getElementById('autoBtn');
+  if (autoRunning) {
+    btn.className = 'bg-red-600 hover:bg-red-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition';
+    btn.textContent = 'Stop Auto';
+    startAutoLoop();
+  } else {
+    btn.className = 'bg-green-700 hover:bg-green-600 text-white font-bold px-4 py-2 rounded-lg text-sm transition';
+    btn.textContent = 'Auto-Run';
+    stopAutoLoop();
+  }
+}
+
+function startAutoLoop() {
+  const ms = Math.max(16, 200 - speed * 9);
+  autoInterval = setInterval(() => {
+    // Auto-drop grains at center each tick
+    const cx = Math.floor(GRID/2), cy = Math.floor(GRID/2);
+    grid[idx(cx,cy)] = Math.min(255, grid[idx(cx,cy)] + 1);
+    totalGrains++;
+    toppleStep();
+    updateStats();
+    render();
+  }, ms);
+}
+
+function stopAutoLoop() {
+  clearInterval(autoInterval);
+  autoInterval = null;
+}
+
+function updateSpeed() {
+  speed = parseInt(document.getElementById('speedSlider').value);
+  document.getElementById('speedVal').textContent = speed;
+  if (autoRunning) { stopAutoLoop(); startAutoLoop(); }
+}
+
+// --- Zoom ---
+function changeZoom(delta) {
+  zoom = Math.max(1, Math.min(4, zoom + delta));
+  document.getElementById('zoomVal').textContent = zoom + '×';
+  canvas.style.width = (GRID * zoom) + 'px';
+  canvas.style.height = (GRID * zoom) + 'px';
+  const wrapper = document.getElementById('canvasWrapper');
+  const size = Math.min(420, parseInt(canvas.style.width));
+  wrapper.style.width = size + 'px';
+  wrapper.style.height = size + 'px';
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  render();
+}
+
+// --- Rendering ---
+function render() {
+  const imgData = ctx.createImageData(GRID, GRID);
+  const colorMap = [
+    [0,0,0,255],        // 0: black
+    [29,78,216,255],    // 1: blue
+    [22,163,74,255],    // 2: green
+    [202,138,4,255],    // 3: yellow
+    [220,38,38,255],    // 4+: red
+  ];
+  let active = 0;
+  for (let i = 0; i < GRID*GRID; i++) {
+    const v = Math.min(4, grid[i]);
+    if (grid[i] >= TOPPLE_THRESHOLD) active++;
+    const [r,g,b,a] = colorMap[v];
+    imgData.data[i*4]   = r;
+    imgData.data[i*4+1] = g;
+    imgData.data[i*4+2] = b;
+    imgData.data[i*4+3] = a;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  document.getElementById('activeCount').textContent = active;
+}
+
+function updateStats() {
+  document.getElementById('grainCount').textContent = totalGrains.toLocaleString();
+  document.getElementById('toppleCount').textContent = totalTopples.toLocaleString();
+}
+
+// --- Canvas click ---
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = GRID / rect.width;
+  const scaleY = GRID / rect.height;
+  const x = Math.floor((e.clientX - rect.left) * scaleX);
+  const y = Math.floor((e.clientY - rect.top) * scaleY);
+  addGrainsAt(x, y, 10);
+  render();
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (e.buttons !== 1) return;
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = GRID / rect.width;
+  const scaleY = GRID / rect.height;
+  const x = Math.floor((e.clientX - rect.left) * scaleX);
+  const y = Math.floor((e.clientY - rect.top) * scaleY);
+  addGrainsAt(x, y, 3);
+  render();
+});
+
+// --- Init ---
+setCanvasSize();
+resetGrid();
+render();
+window.addEventListener('resize', () => { setCanvasSize(); render(); });
+</script>
+</body>
+</html>
